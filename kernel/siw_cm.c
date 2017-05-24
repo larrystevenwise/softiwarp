@@ -1512,12 +1512,14 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 
 	dprint(DBG_CM, "(id=0x%p, QP%d): dev(id)=%s, netdev=%s\n",
 		id, QP_ID(qp), sdev->ofa_dev.name, sdev->netdev->name);
-	dprint(DBG_CM, "(id=0x%p, QP%d): laddr=(0x%x,%d), raddr=(0x%x,%d)\n",
+	dprint(DBG_CM, "(id=0x%p, QP%d): laddr=(%pI4,%u/%u), raddr=(%pI4,%u/%u)\n",
 		id, QP_ID(qp),
-		ntohl(to_sockaddr_in(id->local_addr).sin_addr.s_addr),
+		&to_sockaddr_in(id->local_addr).sin_addr,
 		ntohs(to_sockaddr_in(id->local_addr).sin_port),
-		ntohl(to_sockaddr_in(id->remote_addr).sin_addr.s_addr),
-		ntohs(to_sockaddr_in(id->remote_addr).sin_port));
+		ntohs(to_sockaddr_in(id->m_local_addr).sin_port),
+		&to_sockaddr_in(id->remote_addr).sin_addr,
+		ntohs(to_sockaddr_in(id->remote_addr).sin_port),
+		ntohs(to_sockaddr_in(id->m_remote_addr).sin_port));
 
 	laddr = (struct sockaddr *)&id->local_addr;
 	raddr = (struct sockaddr *)&id->remote_addr;
@@ -2095,19 +2097,18 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 	if (to_sockaddr_in(id->local_addr).sin_family == AF_INET) {
 		/* IPv4 */
 		struct sockaddr_in	laddr = to_sockaddr_in(id->local_addr);
-		u8			*l_ip, *r_ip;
 		struct in_device	*in_dev;
 
-		l_ip = (u8 *) &to_sockaddr_in(id->local_addr).sin_addr.s_addr;
-		r_ip = (u8 *) &to_sockaddr_in(id->remote_addr).sin_addr.s_addr;
 		dprint(DBG_CM, "(id=0x%p): "
-			"laddr(id)  : ipv4=%d.%d.%d.%d, port=%d; "
-			"raddr(id)  : ipv4=%d.%d.%d.%d, port=%d\n",
+			"laddr(id)  : ipv4=%pI4, port=%u/%u; "
+			"raddr(id)  : ipv4=%pI4, port=%u/%u\n",
 			id,
-			l_ip[0], l_ip[1], l_ip[2], l_ip[3],
+			&to_sockaddr_in(id->local_addr).sin_addr,
 			ntohs(to_sockaddr_in(id->local_addr).sin_port),
-			r_ip[0], r_ip[1], r_ip[2], r_ip[3],
-			ntohs(to_sockaddr_in(id->remote_addr).sin_port));
+			ntohs(to_sockaddr_in(id->m_local_addr).sin_port),
+			&to_sockaddr_in(id->remote_addr).sin_addr,
+			ntohs(to_sockaddr_in(id->remote_addr).sin_port),
+			ntohs(to_sockaddr_in(id->m_remote_addr).sin_port));
 
 		in_dev = in_dev_get(sdev->netdev);
 		if (!in_dev) {
@@ -2128,12 +2129,12 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 			    ifa->ifa_address) {
 				laddr.sin_addr.s_addr = ifa->ifa_address;
 
-				l_ip = (u8 *) &laddr.sin_addr.s_addr;
 				dprint(DBG_CM, "(id=0x%p): "
-					"laddr(bind): ipv4=%d.%d.%d.%d,"
-					" port=%d\n", id,
-					l_ip[0], l_ip[1], l_ip[2],
-					l_ip[3], ntohs(laddr.sin_port));
+					"laddr(bind): ipv4=%pI4,"
+					" port=%u/%u\n", id,
+					&laddr.sin_addr.s_addr,
+					ntohs(laddr.sin_port),
+					ntohs(to_sockaddr_in(id->m_local_addr).sin_port));
 
 				rv = siw_listen_address(id, backlog,
 						(struct sockaddr *)&laddr);

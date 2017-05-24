@@ -101,7 +101,7 @@ static ssize_t siw_show_qps(struct file *f, char __user *buf, size_t space,
 	list_for_each_safe(pos, tmp, &sdev->qp_list) {
 		struct siw_qp *qp = list_entry(pos, struct siw_qp, devq);
 		n = snprintf(kbuf + len, space,
-			     "%-7d%-6d%-6d%-5d%-5d%-5d%-5d%d/%-3d0x%-17p"
+			     "%-10d%-6d%-6d%-5d%-5d%-5d%-5d%d/%-3d0x%-17p"
 			     " 0x%-18p\n",
 			     QP_ID(qp),
 			     qp->attrs.state,
@@ -159,9 +159,9 @@ static ssize_t siw_show_ceps(struct file *f, char __user *buf, size_t space,
 	space -= len;
 
 	n = snprintf(kbuf + len, space,
-		     "%-20s%-6s%-6s%-7s%-3s%-3s%-4s%-21s%-9s\n",
+		     "%-20s%-6s%-6s%-10s%-3s%-3s%-4s%-20s%-20s%-20s\n",
 		     "CEP", "State", "Ref's", "QP-ID", "LQ", "LC", "U", "Sock",
-		     "CM-ID");
+		     "CM-ID", "Addresses");
 
 	if (n > space) {
 		len += space;
@@ -172,10 +172,15 @@ static ssize_t siw_show_ceps(struct file *f, char __user *buf, size_t space,
 
 	list_for_each_safe(pos, tmp, &sdev->cep_list) {
 		struct siw_cep *cep = list_entry(pos, struct siw_cep, devq);
+		struct sockaddr_in *lsin, *m_lsin, *rsin, *m_rsin;
+		
+		lsin = &to_sockaddr_in(cep->cm_id->local_addr);
+		rsin = &to_sockaddr_in(cep->cm_id->remote_addr);
+		m_lsin = &to_sockaddr_in(cep->cm_id->m_local_addr);
+		m_rsin = &to_sockaddr_in(cep->cm_id->m_remote_addr);
 
 		n = snprintf(kbuf + len, space,
-			     "0x%-18p%-6d%-6d%-7d%-3s%-3s%-4d0x%-18p"
-			     " 0x%-16p\n",
+			     "0x%p  %-6d%-6d%-10u%-3s%-3s%-4d0x%p  0x%p  %pI4:%u/%u <-> %pI4:%u/%u\n",
 			     cep, cep->state,
 			     atomic_read(&cep->ref.refcount),
 			     cep->qp ? QP_ID(cep->qp) : -1,
@@ -183,7 +188,14 @@ static ssize_t siw_show_ceps(struct file *f, char __user *buf, size_t space,
 			     cep->listen_cep ? "y" : "n",
 			     cep->in_use,
 			     cep->llp.sock,
-			     cep->cm_id);
+			     cep->cm_id,
+			     &lsin->sin_addr,
+			     ntohs(lsin->sin_port),
+			     ntohs(m_lsin->sin_port),
+			     &rsin->sin_addr,
+			     ntohs(rsin->sin_port),
+			     ntohs(m_rsin->sin_port));
+
 		if (n < space) {
 			len += n;
 			space -= n;
