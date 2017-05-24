@@ -1521,8 +1521,8 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		ntohs(to_sockaddr_in(id->remote_addr).sin_port),
 		ntohs(to_sockaddr_in(id->m_remote_addr).sin_port));
 
-	laddr = (struct sockaddr *)&id->local_addr;
-	raddr = (struct sockaddr *)&id->remote_addr;
+	laddr = (struct sockaddr *)&id->m_local_addr;
+	raddr = (struct sockaddr *)&id->m_remote_addr;
 
 	rv = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
 	if (rv < 0)
@@ -1966,8 +1966,8 @@ static int siw_listen_address(struct iw_cm_id *id, int backlog,
 	 * TODO: Do we really need the copies of local_addr and remote_addr
 	 *	 in CEP ???
 	 */
-	memcpy(&cep->llp.laddr, &id->local_addr, sizeof cep->llp.laddr);
-	memcpy(&cep->llp.raddr, &id->remote_addr, sizeof cep->llp.raddr);
+	memcpy(&cep->llp.laddr, &id->m_local_addr, sizeof cep->llp.laddr);
+	memcpy(&cep->llp.raddr, &id->m_remote_addr, sizeof cep->llp.raddr);
 
 	cep->cm_id = id;
 	id->add_ref(id);
@@ -2094,9 +2094,9 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 	 * o For IPv4, use sdev->netdev->ip_ptr
 	 * o For IPv6, use sdev->netdev->ipv6_ptr
 	 */
-	if (to_sockaddr_in(id->local_addr).sin_family == AF_INET) {
+	if (to_sockaddr_in(id->m_local_addr).sin_family == AF_INET) {
 		/* IPv4 */
-		struct sockaddr_in	laddr = to_sockaddr_in(id->local_addr);
+		struct sockaddr_in	laddr = to_sockaddr_in(id->m_local_addr);
 		struct in_device	*in_dev;
 
 		dprint(DBG_CM, "(id=0x%p): "
@@ -2124,8 +2124,8 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 			 * the IP address of the interface.
 			 */
 			if (ipv4_is_zeronet(
-			    to_sockaddr_in(id->local_addr).sin_addr.s_addr) ||
-			    to_sockaddr_in(id->local_addr).sin_addr.s_addr ==
+			    to_sockaddr_in(id->m_local_addr).sin_addr.s_addr) ||
+			    to_sockaddr_in(id->m_local_addr).sin_addr.s_addr ==
 			    ifa->ifa_address) {
 				laddr.sin_addr.s_addr = ifa->ifa_address;
 
