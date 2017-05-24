@@ -70,6 +70,7 @@ MODULE_PARM_DESC(mpa_crc_required, "MPA CRC required");
 MODULE_PARM_DESC(mpa_crc_strict, "MPA CRC off enforced");
 MODULE_PARM_DESC(tcp_nodelay, "Set TCP NODELAY");
 
+#define RELAXED_IRD_NEGOTIATION 1
 
 /*
  * siw_sock_nodelay() - Disable Nagle algorithm
@@ -368,14 +369,6 @@ static int siw_cm_upcall(struct siw_cep *cep, enum iw_cm_event_type reason,
 			event.private_data_len = pd_len;
 			event.private_data = cep->mpa.pdata;
 		}
-		to_sockaddr_in(event.local_addr) = cep->llp.laddr;
-		to_sockaddr_in(event.remote_addr) = cep->llp.raddr;
-	}
-	if (reason == IW_CM_EVENT_CONNECT_REQUEST) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)
-		event.provider_data = cep;
-		event.private_data = cep->mpa.pdata;
-		event.private_data_len = cep->mpa.hdr.params.pd_len;
 		if (__mpa_rr_revision(cep->mpa.hdr.params.bits) < 
 		    MPA_REVISION_2) {
 			event.ird = cep->sdev->attrs.max_ird;
@@ -383,10 +376,24 @@ static int siw_cm_upcall(struct siw_cep *cep, enum iw_cm_event_type reason,
 		} else {
 			event.ird = cep->ird;
 			event.ord = cep->ord;
-			event.private_data_len -= sizeof(struct mpa_v2_data);
-			event.private_data += sizeof(struct mpa_v2_data);
+			if (cep->enhanced_rdma_connection) {
+				event.private_data_len -=
+					sizeof(struct mpa_v2_data);
+				event.private_data +=
+					sizeof(struct mpa_v2_data);
+			}
 		}
-#endif
+		to_sockaddr_in(event.local_addr) = cep->llp.laddr;
+		to_sockaddr_in(event.remote_addr) = cep->llp.raddr;
+	}
+	if (reason == IW_CM_EVENT_ESTABLISHED) {
+		event.ird = cep->ird;
+		event.ord = cep->ord;
+	}
+	if (reason == IW_CM_EVENT_CONNECT_REQUEST) {
+		event.provider_data = cep;
+		event.private_data = cep->mpa.pdata;
+		event.private_data_len = cep->mpa.hdr.params.pd_len;
 		cm_id = cep->listen_cep->cm_id;
 	} else
 		cm_id = cep->cm_id;
@@ -721,7 +728,6 @@ static int siw_proc_mpareq(struct siw_cep *cep)
 	cep->p2ptype = SIW_MPAV2_P2P_DISABLED;
 
 	if (__mpa_rr_revision(req->params.bits) == MPA_REVISION_2) {
-		v2 = (struct mpa_v2_data *)cep->mpa.pdata;
 		if (req->params.bits & MPA_RR_FLAG_ENHANCED) {
 			cep->enhanced_rdma_connection = 1;
 		} else {
@@ -831,19 +837,26 @@ static int siw_proc_mpareply(struct siw_cep *cep)
 			rep_ord = ntohs(v2->ord) & MPA_IRD_ORD_MASK;
 
 			if (cep->ird < rep_ord) {
-				ird_insufficient = 1;
+				if (RELAXED_IRD_NEGOTIATION && rep_ord <=
+				    cep->sdev->attrs.max_ord)
+					cep->ird = rep_ord;
+				else
+					ird_insufficient = 1;
 			} else if (cep->ird > rep_ord) {
 				cep->ird = rep_ord;
 			}
 
 			if (cep->ord > rep_ird) {
-				ird_insufficient = 1;
+				if (RELAXED_IRD_NEGOTIATION)
+					cep->ord = rep_ird;
+				else
+					ird_insufficient = 1;
 			}
 
 			if (ird_insufficient) {
 				rv = -ENOMEM;
-				cep->ord = rep_ord;
-				cep->ird = rep_ird;
+				cep->ird = rep_ord;
+				cep->ord = rep_ird;
 			}
 
 			cep->mpa.enhanced_conn_data.ird = htons(cep->ird) | 
@@ -1742,6 +1755,33 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		up_write(&qp->state_lock);
 		goto error;
 	}
+
+	if (cep->revision == MPA_REVISION_2 && cep->enhanced_rdma_connection) {
+		if (params->ord > cep->ird) {
+			if (RELAXED_IRD_NEGOTIATION) {
+				params->ord = cep->ird;
+			} else {
+				cep->ird = params->ird;
+				cep->ord = params->ord;
+				rv =  -EINVAL;
+				up_write(&qp->state_lock);
+				goto error;
+			}
+		}
+		if (params->ird < cep->ord) {
+			if (!RELAXED_IRD_NEGOTIATION &&
+			    cep->ord > sdev->attrs.max_ord) {
+				params->ird = cep->ord;
+			} else {
+				rv = -ENOMEM;
+				up_write(&qp->state_lock);
+				goto error;
+			}
+		}
+	}
+	cep->ird = params->ird;
+	cep->ord = params->ord;
+
 	cep->cm_id = id;
 	id->add_ref(id);
 
